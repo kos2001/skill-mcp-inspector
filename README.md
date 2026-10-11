@@ -1,4 +1,6 @@
-# MCP & Skill Inspector
+# skill-mcp-inspector
+
+<p><strong lang="ko">한국어</strong> · <a href="README.en.md" lang="en">English</a></p>
 
 Claude Code의 MCP 서버와 스킬 구성을 조사하고, 외부 통신 가능성과 실제 연결 상태를 보고서로 정리하는 도구입니다. Python 3.10 이상과 표준 라이브러리만으로 실행합니다.
 
@@ -46,7 +48,33 @@ cp SKILL.md ~/.claude/skills/mcp-skill-inspector/
 cp -R scripts references ~/.claude/skills/mcp-skill-inspector/
 ```
 
-에이전트가 사용할 절차는 [SKILL.md](SKILL.md)에 있습니다. 테스트와 개발은 `tests/`가 포함된 저장소에서 실행합니다.
+스킬 디렉터리 이름은 `SKILL.md` 프런트매터의 `name: mcp-skill-inspector`를 따릅니다(저장소 이름과 다름). 설치 후 Claude Code에서 "MCP 서버 상태 점검해 줘", "설치된 스킬 중 외부 통신하는 것 목록" 같은 요청을 하면 스킬이 선택되며, 에이전트가 따르는 절차는 [SKILL.md](SKILL.md)에 있습니다. 테스트와 개발은 `tests/`가 포함된 저장소에서 실행합니다.
+
+### 출력 예
+
+`report.md`는 요약, 서버 표, 스킬 분류 순으로 구성됩니다 (검사 없이 실행한 예).
+
+```text
+# MCP & Skill Inspector Report
+
+- Scope: `project`  Probe: `False`
+- Project root: /path/to/project
+
+## Summary
+
+- MCP servers: **2** (classification: {'local': 1, 'external': 1}, transport: {'stdio': 1, 'http': 1})
+- Skills: **3** (classification: {'local': 2, 'external': 1})
+
+## MCP Servers
+
+| Name | Scope | Enabled | Effective | Transport | Class | Health | Latency | Source |
+|------|-------|---------|-----------|-----------|-------|--------|---------|--------|
+| ...  |       |         |           |           |       |        |         |        |
+
+## Skills
+### External skills (1)
+### Skills with no static external markers (2)
+```
 
 ## 사용 예제
 
