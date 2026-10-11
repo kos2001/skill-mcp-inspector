@@ -63,7 +63,9 @@ The skill frontmatter validator passed. A separate CLI smoke run verified
 initialization, paginated tool counts, self-scan evidence, JSON/Markdown output,
 and a successful strict CI exit.
 
-The GitHub matrix is configured locally; hosted CI results require a push.
+The GitHub matrix is configured for Ubuntu/macOS and Python 3.10/3.14.
+At publication, the repository's GitHub Actions setting was disabled, so no
+hosted CI run was produced; the validation results above are local results.
 Legacy HTTP+SSE remains a reachability-only check. OAuth, dynamic authentication
 helpers, traffic monitoring, and long-running stability measurements are outside
 this implementation's scope.

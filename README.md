@@ -156,7 +156,7 @@ HTTP 응답이 있다는 이유만으로 정상 판정하지 않습니다. 리�
 | `--workers N` | 병렬 검사 수; 기본 4, 범위 1–32; 1은 순차 실행 |
 | `--baseline PATH` | 비교할 이전 `report.json` |
 | `--strict` | 스캔·설정 진단이 있으면 실패 |
-| `--fail-on-unhealthy` | 활성·유효 서버가 정상 미검증이거나 진단이 있으면 실패 |
+| `--fail-on-unhealthy` | 활성·유효 서버의 상태가 `ok`가 아니거나 진단이 있으면 실패 |
 
 전체 도움말: `python3 scripts/audit.py --help`
 
@@ -167,7 +167,7 @@ python3 -m unittest discover -s tests -v
 python3 scripts/benchmark.py
 ```
 
-테스트는 임시 설정과 로컬 모의 stdio/HTTP 서버를 사용합니다. 로컬 Python 3.10.20·3.14.7에서 각각 **26개 테스트가 통과**했습니다. [GitHub Actions](.github/workflows/test.yml)는 Linux·macOS와 Python 3.10·3.14 조합을 검사합니다.
+테스트는 임시 설정과 로컬 모의 stdio/HTTP 서버를 사용합니다. 로컬 Python 3.10.20·3.14.7에서 각각 **26개 테스트가 통과**했습니다. [GitHub Actions](.github/workflows/test.yml)는 Linux·macOS와 Python 3.10·3.14 조합을 검사하도록 구성했습니다. 이번 반영 시점에는 저장소에서 Actions가 비활성화되어 있어 원격 CI 결과는 없습니다.
 
 모의 stdio 서버 8개, 서버별 초기화 지연 150ms, 3회 반복한 로컬 측정 결과입니다.
 
