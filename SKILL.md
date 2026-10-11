@@ -1,81 +1,145 @@
 ---
 name: mcp-skill-inspector
-description: Audit installed MCP servers and Skills for stability and external-network exposure. Use whenever the user wants to know which MCP servers/Skills are configured, which ones reach external SaaS endpoints, which are healthy, or wants a stability/dependency report — including phrasings like "check my MCP servers", "are any of my skills calling the internet", "which servers are external", "MCP health check", "audit my plugins", or any request to verify what is installed versus what is actually working.
+description: Inventory Claude Code MCP configurations and installed or cached Skills, explain static network exposure, and optionally check MCP health. Use for MCP health checks, plugin inventories, external dependency audits, or diagnosing configured servers that do not work.
 ---
 
 # MCP & Skill Inspector
 
-## What this skill does
-
-Produces a per-machine audit answering three questions:
-
-1. **What is installed?** — every Skill (`SKILL.md`) and every MCP server declared in `~/.claude/settings*.json`, plugin-bundled `.mcp.json` files, and the project's `.mcp.json` / `.claude/settings*.json`.
-2. **What touches the network?** — each item is classified `local` / `external` / `unknown` from concrete signals (remote URL, npm package matching a known SaaS, credentials in `env`, `WebFetch`/`WebSearch`/`curl` in skill content). Reasons are reported alongside the label so the user can verify.
-3. **What actually works?** — when `--probe` is set, the script connects to each MCP server, runs `initialize` + `tools/list`, and records latency, tool count, and any stderr from crashes.
-
-Output: `report.md` (human) and `report.json` (machine) in the chosen output directory.
-
-## When to use
-
-Trigger this skill whenever the user asks about MCP server inventory, MCP health, skill dependencies, internal vs external network use, plugin auditing, or compliance-style "what is reaching outside our network" questions. It is also the right tool when an MCP server seems broken and the user wants a structured diagnostic.
-
-Don't trigger it for one-off "what does this tool do" questions — those are answered directly from the tool's docs.
+Run the stdlib-only inspector with Python 3.10+. It produces `report.md` and
+`report.json`, including configuration diagnostics, classification reasons, and
+skill evidence with file paths and line numbers.
 
 ## Workflow
 
-1. **Run the audit (enumeration only)** — fast, no side effects, safe to run any time:
-   ```bash
-   python3 scripts/audit.py --out ./mcp-inspector-out
-   ```
-   Read `mcp-inspector-out/report.md` and summarize the three sections (summary, MCP table, external skills) for the user.
+Start with an offline inventory:
 
-2. **Run with health probe** when the user asks "is it actually working" or wants stability data:
-   ```bash
-   python3 scripts/audit.py --out ./mcp-inspector-out --probe --probe-timeout 8
-   ```
-   This spawns each stdio MCP server briefly and makes one HTTP request per remote server. It is safe but not free — warn the user before probing in restricted environments. Use `--scope project` to limit probing to the current project.
+```bash
+python3 scripts/audit.py --out ./mcp-inspector-out
+```
 
-3. **Read the report aloud** focusing on:
-   - The external/local breakdown
-   - Any servers in `Unhealthy servers` (status `exited`, `timeout`, `unreachable`, `error`)
-   - External skills that may surprise the user (e.g., a skill they thought was offline)
+Discovery covers user and current-project entries in `~/.claude.json`, legacy
+`~/.claude/settings*.json`, project `.mcp.json` and `.claude/settings*.json`,
+Claude skill directories, and plugin cache/marketplace directories. The inventory
+retains shadowed definitions and cached plugins. `enabled` describes configured
+activation; `effective` identifies the winning definition among user, project,
+and local scopes. These fields do not prove approval or runtime health.
 
-4. **Follow-up actions to offer:**
-   - For each `exited` stdio server, suggest reading `stderr_tail` in `report.json` — most failures are missing env vars, missing binaries (`php`, `docker`), or unexpanded `${CLAUDE_PLUGIN_ROOT}`.
-   - For each `external` server, offer to look up the privacy/data-handling implications.
-   - For each external skill, offer to show the matching pattern (the line that triggered the classification) so the user can audit it.
+When the user requests health checks, run a probe of the relevant servers:
 
-## Flags
+```bash
+python3 scripts/audit.py --scope project --probe --workers 4 --probe-timeout 8
+```
+
+Probes execute configured commands and contact configured URLs. Use the user's
+requested scope; `--server NAME` selects particular servers. Enumeration alone
+does neither. Cached plugin servers are disabled unless their installation path
+is present in `plugins/installed_plugins.json` for the applicable scope and the
+plugin is not disabled in settings. Probes skip disabled and shadowed definitions.
+
+The default `legacy` protocol mode negotiates a version through `initialize`,
+sends `notifications/initialized`, and lists all tool pages when the server
+advertises tools. It supports revisions 2024-11-05, 2025-03-26, 2025-06-18, and
+2025-11-25. Resources/prompts-only servers can also pass initialization.
+Streamable HTTP supports JSON and SSE responses, configured headers, session
+IDs, and best-effort session deletion. It refuses redirects.
+
+For servers using the 2026-07-28 protocol, select modern discovery explicitly:
+
+```bash
+python3 scripts/audit.py --probe --server NAME --protocol-era modern
+```
+
+Modern mode uses `server/discover` and per-request metadata rather than an
+initialization handshake. There is no automatic era fallback. Both modes inspect
+metadata and tool lists; they never invoke tools.
+
+Summarize the report using these distinctions:
+
+- `ok`: valid MCP initialization/discovery and, if advertised, tool enumeration.
+- `auth_required` / `forbidden`: endpoint responds, but access is not verified.
+- `reachable`: legacy HTTP+SSE endpoint responds; its MCP handshake is unverified.
+- `partial`: initialization/discovery worked but tool enumeration failed.
+- `config_error`, `error`, `timeout`, `exited`, `unreachable`: inspect diagnostics
+  and health details, including the redacted `stderr_tail`.
+- `disabled` / `skipped`: not checked; neither counts as a successful probe.
+
+Do not describe a `local` classification as proof that a server or skill cannot
+contact the network. Classification is static evidence, not traffic monitoring.
+Unrecognized servers and incomplete skill scans are `unknown`. Read
+[references/classification-rules.md](references/classification-rules.md) when
+explaining classification or health states.
+
+## Comparison and automation
+
+Compare two inventories taken with the same root, scope, and server filter:
+
+```bash
+python3 scripts/audit.py --baseline /path/to/previous/report.json --out ./current-report
+```
+
+The `changes` section lists added, removed, and changed servers/skills. It ignores
+latency and timestamps; health status changes appear only when both snapshots
+contain health results. Credential values are omitted, so credential rotations
+are not detected. Save the baseline separately before reusing its output directory.
+
+For CI, reports are written before returning a failure code:
+
+```bash
+python3 scripts/audit.py --scope project --probe --strict --fail-on-unhealthy
+```
+
+`--strict` returns 1 on scan/configuration diagnostics. `--fail-on-unhealthy`
+requires `--probe` and returns 1 on diagnostics or any enabled, effective server
+whose probe is not `ok`, including missing executables and unverified endpoints.
+Invalid arguments or baselines return 2. A successful run returns 0.
+
+## Options
 
 | Flag | Effect |
 |------|--------|
-| `--scope all` (default) | scan `~/.claude` and project |
-| `--scope user` | only `~/.claude` |
-| `--scope project` | only the current project |
-| `--probe` | actually connect to MCP servers and measure |
-| `--probe-timeout SECS` | per-server timeout (default 8s) |
-| `--out DIR` | output directory (default `./mcp-inspector-out`) |
-| `--claude-home PATH` | override `~/.claude` (also reads `CLAUDE_HOME` env) |
+| `--scope all\|user\|project` | inventory scope; default `all` |
+| `--project-root PATH` | project directory; default current working directory |
+| `--claude-home PATH` | skill/settings/plugin directory; default `CLAUDE_HOME` or `~/.claude` |
+| `--claude-config PATH` | global MCP config; default `.claude.json` beside Claude home |
+| `--config PATH` | additional MCP JSON file; repeatable |
+| `--server NAME` | exact server-name filter; repeatable |
+| `--probe` | execute health probes |
+| `--protocol-era legacy\|modern` | protocol mode; default `legacy` |
+| `--probe-timeout SECONDS` | positive, finite per-server protocol budget; default 8 |
+| `--workers N` | simultaneous probes, 1–32; default 4; use 1 to serialize |
+| `--baseline PATH` | previous inspector JSON report |
+| `--strict` | fail on diagnostics |
+| `--fail-on-unhealthy` | fail on unsuccessful/unverified enabled probes or diagnostics |
+| `--out DIR` | output directory; default `./mcp-inspector-out` |
 
-## Classification cheat sheet
+## Practical limits
 
-See `references/classification-rules.md` for the full rule list. Quick summary:
+- Enumeration identifies configured/cached artifacts, not every runtime connector.
+  Managed policies, inline plugin-manifest MCP definitions, dynamic headers
+  helpers, OAuth login, and runtime approval decisions are not resolved.
+- Plugin activation is inferred from the installation registry and settings.
+  Plugin endpoint deduplication against other servers is not emulated.
+- Legacy HTTP+SSE receives a reachability check only. WebSocket and SDK entries
+  are inventoried but their probes are skipped. Stdio probes require macOS/Linux.
+- One-shot probes do not establish long-term stability. The timeout covers
+  protocol work, with a short process-cleanup allowance; OS DNS resolution or
+  process creation can exceed it. Disconnected SSE streams are not resumed.
+- Scans skip `.git`, `node_modules`, virtual environments, build output, and
+  nested directory symlinks. Individual skill/script files over 2 MiB produce
+  diagnostics. Protocol responses have a 1 MiB limit; tools have a 100-page limit.
+- Reports omit runtime env/header values and redact known configured credentials,
+  credential arguments, URL userinfo/query values, and common token forms.
+  This is best-effort redaction of recognizable secrets, not a guarantee for
+  arbitrary server messages. Review reports before sharing them.
 
-- **MCP external** — `type: http`/`sse`, has `url`, or args contain a known SaaS package name (linear, github, slack, notion, …), or has credential-shaped env keys (`*_KEY`, `*_TOKEN`, `*_SECRET`).
-- **MCP local** — stdio server whose args match local capabilities (filesystem, sqlite, memory, …) or has no external markers.
-- **Skill external** — SKILL.md or sibling scripts use `WebFetch`, `WebSearch`, `curl`/`wget`, `requests.*`, `fetch('http…')`, the `gh` CLI, an `mcp__*` tool call, or mention an API key.
-- **Skill local** — none of the above.
+## Maintenance
 
-The classifier is deliberately conservative: when a stdio server has no clear local markers it is labelled `local` with a `no external markers; treated as local by default` reason, so anything labelled `external` always has a concrete trigger you can quote.
+```bash
+python3 -m unittest discover -s tests -v
+python3 scripts/benchmark.py
+```
 
-## Known limitations
-
-- **Plugin-bundled servers with `${CLAUDE_PLUGIN_ROOT}`** — the script expands this placeholder to the directory containing the `.mcp.json` when probing, which matches how Claude Code resolves it. If a plugin still fails with `ENOENT` after this, the plugin's manifest expects a different working directory.
-- **HTTP probes do not authenticate** — a `401`/`403` response counts as "server reachable and responding". The script doesn't ship credentials around.
-- **Static skill classification** — we infer "external" from SKILL.md content; a skill that conditionally uses the network only on some inputs may be over-classified. That's the safer error.
-- **No long-running stability test** — `--probe` is a one-shot smoke test. For continuous monitoring, wire `report.json` into your own dashboard.
-
-## Files
-
-- `scripts/audit.py` — the inspector. Single file, stdlib only, Python 3.10+.
-- `references/classification-rules.md` — detailed rule reference.
+Tests use temporary configuration trees and local fake stdio/HTTP servers.
+The benchmark measures sequential versus parallel probes of local synthetic
+servers. Read [references/improvements.md](references/improvements.md) for the
+GitHub/specification sources behind the implementation and measured results.
